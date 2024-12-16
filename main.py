@@ -5,6 +5,7 @@ import numpy as np
 from binance.client import Client
 import datetime
 import time
+import math
 
 # Umgebungsvariablen laden
 load_dotenv()
@@ -14,94 +15,89 @@ api_key = os.getenv('BINANCE_API_KEY')
 api_secret = os.getenv('BINANCE_API_SECRET')
 
 # Client initialisieren
-client = Client(api_key, api_secret, testnet=False)
+client = Client(api_key, api_secret)
 
-def fetch_combined_historical_data(symbols, interval, start_date, end_date):
+def fetch_historical_minute_data(symbol, start_date, end_date, batch_size=500):
     """
-    Holt historische Kryptowährungsdaten für mehrere Symbole
+    Holt historische 1-Minuten-Daten mit Batching
     
-    :param symbols: Liste von Handelssymbolen (z.B. ['BTCUSDT', 'BNBUSDT'])
-    :param interval: Zeitintervall ('1h', '4h', '1d')
-    :param start_date: Startdatum für Datenabfrage
-    :param end_date: Enddatum für Datenabfrage
-    :return: pandas DataFrame mit kombinierten historischen Daten
+    :param symbol: Handelssymbol (z.B. 'BTCUSDT')
+    :param start_date: Startdatum
+    :param end_date: Enddatum
+    :param batch_size: Anzahl der Klines pro Anfrage
+    :return: pandas DataFrame mit historischen Daten
     """
-    combined_data = []
+    # Konvertiere Datumsstring zu datetime
+    start = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+    end = datetime.datetime.strptime(end_date, '%Y-%m-%d')
     
-    for symbol in symbols:
+    # Initialisiere leeren DataFrame
+    all_data = []
+    
+    # Aktuelle Position
+    current = start
+    
+    while current < end:
+        # Berechne Endzeitpunkt des Batches
+        batch_end = min(current + datetime.timedelta(days=batch_size), end)
+        
         try:
-            # Daten von Binance abrufen
+            # Hole Klines für den Batch
             klines = client.get_historical_klines(
                 symbol, 
-                interval, 
-                start_str=start_date, 
-                end_str=end_date
+                Client.KLINE_INTERVAL_1MINUTE, 
+                current.strftime('%Y-%m-%d'),
+                batch_end.strftime('%Y-%m-%d')
             )
             
-            # Daten in DataFrame umwandeln
-            df = pd.DataFrame(klines, columns=[
-                f'{symbol}_Open Time', f'{symbol}_Open', f'{symbol}_High', 
-                f'{symbol}_Low', f'{symbol}_Close', f'{symbol}_Volume', 
-                f'{symbol}_Close Time', f'{symbol}_Quote Asset Volume', 
-                f'{symbol}_Number of Trades', 
-                f'{symbol}_Taker Buy Base Asset Volume', 
-                f'{symbol}_Taker Buy Quote Asset Volume', 
-                f'{symbol}_Ignore'
+            # Wandle Klines in DataFrame um
+            batch_df = pd.DataFrame(klines, columns=[
+                'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 
+                'Close Time', 'Quote Asset Volume', 'Number of Trades', 
+                'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume', 'Ignore'
             ])
             
-            # Zeitstempel und numerische Spalten konvertieren
-            time_columns = [f'{symbol}_Open Time', f'{symbol}_Close Time']
-            df[time_columns] = df[time_columns].apply(pd.to_datetime, unit='ms')
+            all_data.append(batch_df)
             
-            numeric_columns = [
-                f'{symbol}_Open', f'{symbol}_High', f'{symbol}_Low', 
-                f'{symbol}_Close', f'{symbol}_Volume'
-            ]
-            df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors='coerce')
+            # Bewege zum nächsten Batch
+            current = batch_end
             
-            combined_data.append(df)
-            
-            # Kleine Pause zwischen Anfragen
+            # Pause zwischen Anfragen
             time.sleep(0.5)
+            
+            print(f"Verarbeitet bis: {current}")
         
         except Exception as e:
-            print(f"Fehler bei Datenabfrage für {symbol}: {e}")
+            print(f"Fehler bei Datenabfrage: {e}")
+            # Warte und versuche es erneut
+            time.sleep(5)
     
-    # Kombiniere DataFrames basierend auf Zeitstempel
-    if combined_data:
-        # Wähle den ersten DataFrame als Basis
-        result_df = combined_data[0]
+    # Kombiniere alle Batches
+    if all_data:
+        result_df = pd.concat(all_data, ignore_index=True)
         
-        # Führe Joins für die weiteren DataFrames durch
-        for additional_df in combined_data[1:]:
-            result_df = pd.merge(
-                result_df, 
-                additional_df, 
-                left_on=f'{symbols[0]}_Open Time', 
-                right_on=f'{symbols[1]}_Open Time', 
-                how='outer'
-            )
+        # Konvertiere Zeitstempel
+        result_df['Open Time'] = pd.to_datetime(result_df['Open Time'], unit='ms')
+        result_df['Close Time'] = pd.to_datetime(result_df['Close Time'], unit='ms')
         
-        # Sortiere nach Zeitstempel
-        result_df.sort_values(by=f'{symbols[0]}_Open Time', inplace=True)
+        # Konvertiere numerische Spalten
+        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        result_df[numeric_columns] = result_df[numeric_columns].astype(float)
         
         return result_df
     
     return None
 
-# Anwendungsbeispiel
+# Beispielaufruf
 symbols = ['BTCUSDT', 'BNBUSDT']
-interval = '1h'
-start_date = '2023-01-01'
-end_date = datetime.datetime.now().strftime('%Y-%m-%d')
+start_date = '2017-01-01'
+end_date = '2024-12-31'
 
-# Daten abrufen
-combined_data = fetch_combined_historical_data(symbols, interval, start_date, end_date)
-
-# Daten speichern
-if combined_data is not None:
-    combined_data.to_csv('combined_crypto_data.csv', index=False)
-    print("Daten erfolgreich gespeichert.")
-    print(f"Datensatz-Größe: {combined_data.shape}")
-    print("\nSpaltenbeispiel:")
-    print(combined_data.columns.tolist())
+for symbol in symbols:
+    df = fetch_historical_minute_data(symbol, start_date, end_date)
+    
+    if df is not None:
+        filename = f'{symbol}_minute_data.csv'
+        df.to_csv(filename, index=False)
+        print(f"Daten für {symbol} gespeichert: {filename}")
+        print(f"Anzahl der Datenpunkte: {len(df)}")
