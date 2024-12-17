@@ -91,7 +91,11 @@ class CryptoDataExtractor:
                 # Numerische Spalten konvertieren
                 numeric_cols = [
                     f'{symbol}_Open', f'{symbol}_High', 
-                    f'{symbol}_Low', f'{symbol}_Close', f'{symbol}_Volume'
+                    f'{symbol}_Low', f'{symbol}_Close', f'{symbol}_Volume',
+                    f'{symbol}_Quote Asset Volume',
+                    f'{symbol}_Number of Trades',
+                    f'{symbol}_Taker Buy Base Asset Volume',
+                    f'{symbol}_Taker Buy Quote Asset Volume'
                 ]
                 batch_df[numeric_cols] = batch_df[numeric_cols].astype(float)
                 
@@ -136,38 +140,28 @@ def main():
     # Symbole und Zeitraum
     symbols = ['BTCUSDT', 'BNBUSDT']
     start_date = '2017-01-01'
-    end_date = '2017-06-16'
+    end_date = '2017-12-31'
 
-    # Finale Datensammlung
-    final_data = None
+    # Liste zur Speicherung der Daten
+    all_symbol_data = []
 
     # Daten für jedes Symbol extrahieren
-    dfs = {}
     for symbol in symbols:
         symbol_data = extractor.fetch_historical_minute_data(symbol, start_date, end_date)
         
         if symbol_data is not None:
-            # Drucken Sie die ersten Zeilen, um zu prüfen, ob Daten vorhanden sind
-            print(f"{symbol} - Erste Zeilen:")
-            print(symbol_data.head())
-            print(f"{symbol} - Anzahl Zeilen: {len(symbol_data)}")
-            
-            dfs[symbol] = symbol_data
-
-    if len(dfs) == 2:
-        final_data = pd.merge(
-            dfs['BTCUSDT'], 
-            dfs['BNBUSDT'], 
-            how='outer'
-        )        
+            all_symbol_data.append(symbol_data)
 
     # Daten speichern
-        filename = 'test.csv'
+    if all_symbol_data:
+        # Kombiniere alle Daten nebeneinander
+        final_data = pd.concat(all_symbol_data, axis=1)
+        
+        # Speichere die Daten
+        filename = 'test3.csv'
         final_data.to_csv(filename, index=False)
         logging.info(f"Daten gespeichert: {filename}")
         logging.info(f"Gesamtanzahl der Datenpunkte: {len(final_data)}")
-    else:
-        print("Nicht genügend Daten für beide Symbole")
 
 if __name__ == "__main__":
     main()
