@@ -136,34 +136,38 @@ def main():
     # Symbole und Zeitraum
     symbols = ['BTCUSDT', 'BNBUSDT']
     start_date = '2017-01-01'
-    end_date = '2024-12-16'
+    end_date = '2017-06-16'
 
     # Finale Datensammlung
     final_data = None
 
     # Daten für jedes Symbol extrahieren
+    dfs = {}
     for symbol in symbols:
         symbol_data = extractor.fetch_historical_minute_data(symbol, start_date, end_date)
         
         if symbol_data is not None:
-            if final_data is None:
-                final_data = symbol_data
-            else:
-                # Merge der Daten
-                final_data = pd.merge(
-                    final_data, 
-                    symbol_data, 
-                    left_on='BTCUSDT_Open Time', 
-                    right_on='BNBUSDT_Open Time', 
-                    how='outer'
-                )
+            # Drucken Sie die ersten Zeilen, um zu prüfen, ob Daten vorhanden sind
+            print(f"{symbol} - Erste Zeilen:")
+            print(symbol_data.head())
+            print(f"{symbol} - Anzahl Zeilen: {len(symbol_data)}")
+            
+            dfs[symbol] = symbol_data
+
+    if len(dfs) == 2:
+        final_data = pd.merge(
+            dfs['BTCUSDT'], 
+            dfs['BNBUSDT'], 
+            how='outer'
+        )        
 
     # Daten speichern
-    if final_data is not None:
-        filename = 'combined_minute_crypto_data.csv'
+        filename = 'test.csv'
         final_data.to_csv(filename, index=False)
         logging.info(f"Daten gespeichert: {filename}")
         logging.info(f"Gesamtanzahl der Datenpunkte: {len(final_data)}")
+    else:
+        print("Nicht genügend Daten für beide Symbole")
 
 if __name__ == "__main__":
     main()
