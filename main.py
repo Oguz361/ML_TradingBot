@@ -17,6 +17,20 @@ class CryptoDataExtractor:
     def __init__(self, api_key, api_secret):
         self.client = Client(api_key, api_secret)
         self.checkpoint_file = 'extraction_checkpoint.json'
+        self.current_symbol_file = 'current_symbol.txt'
+
+    def save_current_symbol(self, symbol):
+        """Speichert das aktuell zu extrahierende Symbol"""
+        with open(self.current_symbol_file, 'w') as f:
+            f.write(symbol)
+
+    def get_current_symbol(self):
+        """Liest das aktuell zu extrahierende Symbol"""
+        try:
+            with open(self.current_symbol_file, 'r') as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return None
 
     def load_checkpoint(self):
         """Lädt den letzten Checkpoint der Extraktion"""
@@ -41,6 +55,19 @@ class CryptoDataExtractor:
                 json.dump(checkpoint, f)
         except Exception as e:
             logging.error(f"Fehler beim Speichern des Checkpoints: {e}")
+
+    def reset_checkpoint(self):
+        """
+        Setzt den Checkpoint zurück, indem die Checkpoint-Datei gelöscht wird
+        """
+        try:
+            if os.path.exists(self.checkpoint_file):
+                os.remove(self.checkpoint_file)
+            if os.path.exists(self.current_symbol_file):
+                os.remove(self.current_symbol_file)
+            logging.info("Checkpoint und aktuelles Symbol zurückgesetzt.")
+        except Exception as e:
+            logging.error(f"Fehler beim Zurücksetzen: {e}")
 
     def fetch_historical_minute_data(self, symbol, start_date, end_date, batch_size=30):
         """
@@ -140,28 +167,45 @@ def main():
     # Symbole und Zeitraum
     symbols = ['BTCUSDT', 'BNBUSDT']
     start_date = '2017-01-01'
-    end_date = '2017-12-31'
+    end_date = '2017-05-31'
 
-    # Liste zur Speicherung der Daten
-    all_symbol_data = []
-
-    # Daten für jedes Symbol extrahieren
-    for symbol in symbols:
-        symbol_data = extractor.fetch_historical_minute_data(symbol, start_date, end_date)
-        
-        if symbol_data is not None:
-            all_symbol_data.append(symbol_data)
-
+    # Aktuelles zu extrahierendes Symbol bestimmen
+    current_symbol = extractor.get_current_symbol()
+    
+    # Wenn kein Symbol gespeichert, beginne mit dem ersten
+    if not current_symbol:
+        current_symbol = symbols[0]
+    
+    # Daten für das aktuelle Symbol extrahieren
+    symbol_data = extractor.fetch_historical_minute_data(current_symbol, start_date, end_date)
+    
+    # Bestimme den nächsten zu extrahierenden Symbols
+    next_symbol_index = (symbols.index(current_symbol) + 1) % len(symbols)
+    next_symbol = symbols[next_symbol_index]
+    
+    # Speichere den nächsten zu extrahierenden Symbol
+    extractor.save_current_symbol(next_symbol)
+    
+    # Daten laden oder initialisieren
+    try:
+        existing_data = pd.read_csv('test_multi.csv')
+    except FileNotFoundError:
+        existing_data = pd.DataFrame()
+    
+    # Neue Daten zur bestehenden Datei hinzufügen
+    if not existing_data.empty:
+        # Zusammenführen der Daten nebeneinander
+        final_data = pd.concat([existing_data, symbol_data], axis=1)
+    else:
+        final_data = symbol_data
+    
     # Daten speichern
-    if all_symbol_data:
-        # Kombiniere alle Daten nebeneinander
-        final_data = pd.concat(all_symbol_data, axis=1)
-        
-        # Speichere die Daten
-        filename = 'test3.csv'
-        final_data.to_csv(filename, index=False)
-        logging.info(f"Daten gespeichert: {filename}")
-        logging.info(f"Gesamtanzahl der Datenpunkte: {len(final_data)}")
+    final_data.to_csv('test_multi.csv', index=False)
+    
+    logging.info(f"Daten für {current_symbol} gespeichert")
+    logging.info(f"Gesamtanzahl der Datenpunkte: {len(final_data)}")
+    
+    print(f"Nächstes zu extrahierendes Symbol: {next_symbol}")
 
 if __name__ == "__main__":
     main()
