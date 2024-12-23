@@ -84,15 +84,81 @@ class CryptoDataExtractor:
             return False
             
         return True
+    
+    def find_earliest_trading_date(self, symbol):
+        """
+        Findet das früheste verfügbare Handelsdatum für ein Symbol mittels binärer Suche.
+        """
+        logging.info(f"Suche frühestes Handelsdatum für {symbol}")
+        
+        # Definiere Suchbereich
+        start = datetime.datetime(2015, 1, 1)
+        end = datetime.datetime.now()
+        
+        # Binäre Suche
+        while (end - start).days > 1:
+            mid = start + (end - start) / 2
+            
+            try:
+                klines = self.client.get_historical_klines(
+                    symbol,
+                    Client.KLINE_INTERVAL_1MINUTE,
+                    mid.strftime('%Y-%m-%d'),
+                    (mid + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                )
+                
+                if klines:
+                    end = mid
+                    logging.debug(f"Daten gefunden für {mid.date()}, suche weiter zurück")
+                else:
+                    start = mid
+                    logging.debug(f"Keine Daten für {mid.date()}, suche weiter vorne")
+                    
+            except Exception as e:
+                logging.error(f"Fehler bei der Suche: {e}")
+                start = mid
+                
+            time.sleep(1)
+        
+        # Verifiziere das finale Datum
+        final_check_date = end
+        while True:
+            try:
+                klines = self.client.get_historical_klines(
+                    symbol,
+                    Client.KLINE_INTERVAL_1MINUTE,
+                    final_check_date.strftime('%Y-%m-%d'),
+                    (final_check_date + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                )
+                if klines:
+                    first_timestamp = pd.to_datetime(klines[0][0], unit='ms')
+                    logging.info(f"Frühestes Handelsdatum für {symbol}: {first_timestamp}")
+                    return first_timestamp
+                final_check_date += datetime.timedelta(days=1)
+            except Exception as e:
+                logging.error(f"Fehler bei der finalen Überprüfung: {e}")
+                final_check_date += datetime.timedelta(days=1)
+            
+            time.sleep(1)
             
     def fetch_historical_minute_data(self, symbol, start_date, end_date, batch_size=30, max_retries=3):
         """
         Extrahiert historische Minutendaten mit erweitertem Logging
         """
+        """
+        Extrahiert historische Minutendaten mit verbesserter Fehlerbehandlung
+        """
         try:
-            # Konvertiere Datumsstring zu datetime
-            start = datetime.datetime.strptime(start_date, '%Y-%m-%d')
-            end = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            # Konvertiere Datumsstring zu datetime wenn nötig
+            if isinstance(start_date, str):
+                start = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+            else:
+                start = start_date
+
+            if isinstance(end_date, str):
+                end = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            else:
+                end = end_date
             
             logging.info(f"Starte Datenextraktion für {symbol} von {start} bis {end}")
             
@@ -227,10 +293,20 @@ def main():
         # Extractor initialisieren
         extractor = CryptoDataExtractor(api_key, api_secret)
         
-        # Symbole und Zeitraum
+        # Symbole definieren
         symbols = ['BTCUSDT', 'BNBUSDT']
-        start_date = '2017-01-01'
-        end_date = '2024-12-19'
+        
+        # Finde frühestes Datum für jedes Symbol
+        start_dates = {}
+        for symbol in symbols:
+            start_dates[symbol] = extractor.find_earliest_trading_date(symbol)
+            logging.info(f"Frühestes Datum für {symbol}: {start_dates[symbol]}")
+        
+        # Verwende das spätere der beiden Startdaten als globales Startdatum
+        global_start_date = max(start_dates.values())
+        end_date = datetime.datetime.now() - datetime.timedelta(days=1)  # Bis gestern
+        
+        logging.info(f"Verwende globales Startdatum: {global_start_date}")
         
         data_frames = {}
         
@@ -238,7 +314,11 @@ def main():
             logging.info(f"Starte Extraktion für {symbol}")
             extractor.reset_checkpoint()
             
-            symbol_data = extractor.fetch_historical_minute_data(symbol, start_date, end_date)
+            symbol_data = extractor.fetch_historical_minute_data(
+                symbol, 
+                global_start_date, 
+                end_date
+            )
             
             if symbol_data is not None and not symbol_data.empty:
                 data_frames[symbol] = symbol_data
